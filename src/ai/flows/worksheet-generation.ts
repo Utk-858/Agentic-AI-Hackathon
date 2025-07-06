@@ -17,11 +17,13 @@ const GenerateWorksheetInputSchema = z.object({
   gradeLevel: z.string().describe('The grade level for the worksheet.'),
   numberOfQuestions: z.number().describe('The number of questions to generate.'),
   language: z.string().describe('The language for the worksheet.'),
+  specialRequest: z.string().optional().describe('Any special requests or other important considerations.'),
 });
 export type GenerateWorksheetInput = z.infer<typeof GenerateWorksheetInputSchema>;
 
 const GenerateWorksheetOutputSchema = z.object({
-  worksheet: z.string().describe('The generated worksheet with questions and answers.'),
+  worksheet: z.string().describe('The generated worksheet, containing ONLY the questions, formatted in HTML.'),
+  answerKey: z.string().describe('A separate answer key for the worksheet questions, formatted in HTML.'),
 });
 export type GenerateWorksheetOutput = z.infer<typeof GenerateWorksheetOutputSchema>;
 
@@ -35,21 +37,35 @@ const generateWorksheetFlow = ai.defineFlow(
     inputSchema: GenerateWorksheetInputSchema,
     outputSchema: GenerateWorksheetOutputSchema,
   },
-  async ({ topic, gradeLevel, numberOfQuestions, language }) => {
-    const prompt = `You are an AI assistant for teachers. Your task is to generate a worksheet in ${language}.
+  async ({ topic, gradeLevel, numberOfQuestions, language, specialRequest }) => {
+    
+    const prompt = ai.definePrompt({
+        name: 'generateWorksheetPrompt',
+        output: { schema: GenerateWorksheetOutputSchema },
+        prompt: `You are an AI assistant for teachers. Your task is to generate a worksheet and a separate answer key in ${language}.
 
-Topic: ${topic}
-Grade Level: ${gradeLevel}
-Number of Questions: ${numberOfQuestions}
-
-Generate a worksheet with the specified number of questions suitable for the given grade level. The worksheet should be formatted clearly in markdown and be easy to read. After all the questions, include a separate section titled "Answer Key" with the answers.`;
-
-    const result = await ai.generate({
-      prompt: prompt,
+        Topic: ${topic}
+        Grade Level: ${gradeLevel}
+        Number of Questions: ${numberOfQuestions}
+      
+        ${specialRequest ? `\nSpecial Request: "${specialRequest}"\nPlease adhere to this request when generating questions.` : ''}
+      
+        Instructions:
+        1.  Create a "worksheet" with the specified number of questions suitable for the given grade level. Format it using simple HTML tags (<h2>, <p>, <ol>, <li>).
+        2.  Create a separate "answerKey" that contains the answers to the questions. This section should also be formatted in clean HTML and start with an <h2> heading titled "Answer Key".
+        3.  Ensure your response is a valid JSON object containing both the "worksheet" and "answerKey" fields. Do not include <!DOCTYPE> or <html>/<body> tags in your HTML content.`,
     });
 
-    const worksheet = result.text ?? "Sorry, I couldn't generate a worksheet. Please try again.";
 
-    return { worksheet };
+    const {output} = await prompt({});
+    
+    if (!output) {
+        return {
+            worksheet: "Sorry, I couldn't generate a worksheet. Please try again.",
+            answerKey: "No answer key could be generated."
+        };
+    }
+
+    return output;
   }
 );

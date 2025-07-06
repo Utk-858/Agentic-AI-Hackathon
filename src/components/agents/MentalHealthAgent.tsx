@@ -4,9 +4,9 @@ import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Mic, Send, Play, Pause, HeartPulse } from 'lucide-react';
+import { Loader2, Mic, Send, Play, Pause, HeartPulse, Square } from 'lucide-react';
 import { emotionalSupport } from '@/ai/flows/emotional-support';
-import MarkdownRenderer from '../MarkdownRenderer';
+import HtmlRenderer from '../HtmlRenderer';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -29,9 +29,12 @@ export default function MentalHealthAgent() {
   const [isLoading, setIsLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ isPlaying: false, messageIndex: null });
-
+  const [isRecording, setIsRecording] = useState(false);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -63,7 +66,76 @@ export default function MentalHealthAgent() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAudioSubmit = async (audioDataUri: string) => {
+    stopCurrentAudio();
+    setIsLoading(true);
+
+    const userMessage: Message = { role: 'user', content: '[Audio Message]' };
+    const newMessages: Message[] = [...messages, userMessage];
+    setMessages(newMessages);
+
+    const history = messages.map(({ role, content }) => ({ role, content }));
+
+    try {
+      const result = await emotionalSupport({ audioDataUri, history });
+      setMessages(prev => [...prev, { role: 'model', content: result.response, media: result.media }]);
+    } catch (error) {
+      console.error(error);
+      toast({
+        variant: 'destructive',
+        title: 'An error occurred',
+        description: 'Failed to process your audio. Please try again.',
+      });
+      setMessages(messages);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  const startRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = { mimeType: 'audio/webm' };
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+      };
+      
+      mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: options.mimeType });
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = () => {
+              const base64Audio = reader.result as string;
+              if (base64Audio) handleAudioSubmit(base64Audio);
+          };
+          stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      toast({
+          variant: 'destructive',
+          title: 'Microphone access denied',
+          description: 'Please allow microphone access in your browser settings to use this feature.',
+      });
+    }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!query.trim()) return;
 
@@ -122,7 +194,7 @@ export default function MentalHealthAgent() {
                   message.role === 'user' ? "bg-primary text-primary-foreground" : "bg-muted"
                 )}>
                   <div className="prose prose-sm text-inherit max-w-none">
-                    <MarkdownRenderer content={message.content} className="bg-transparent p-0" />
+                    <HtmlRenderer content={message.content} className="bg-transparent p-0" />
                   </div>
                   {message.role === 'model' && message.media && (
                     <Button onClick={() => togglePlayback(index, message.media!)} size="icon" variant="ghost" className="shrink-0">
@@ -145,9 +217,9 @@ export default function MentalHealthAgent() {
           </div>
         </ScrollArea>
         <div className="pt-2">
-          <form onSubmit={handleSubmit} className="relative">
+          <form onSubmit={handleTextSubmit} className="relative">
             <Textarea
-              placeholder="Share what's on your mind..."
+              placeholder="Share what's on your mind... or use the mic"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               rows={1}
@@ -155,16 +227,16 @@ export default function MentalHealthAgent() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
                   e.preventDefault();
-                  handleSubmit(e as any);
+                  handleTextSubmit(e as any);
                 }
               }}
-              disabled={isLoading}
+              disabled={isLoading || isRecording}
             />
             <div className="absolute top-1/2 -translate-y-1/2 right-2 flex items-center gap-1">
-              <Button type="button" size="icon" variant="ghost" disabled title="Voice to voice (coming soon)">
-                  <Mic className="h-5 w-5"/>
+              <Button type="button" size="icon" variant="ghost" onClick={startRecording} disabled={isLoading} title={isRecording ? "Stop Recording" : "Start Recording"}>
+                  {isRecording ? <Square className="h-5 w-5 fill-red-500 text-red-500 animate-pulse" /> : <Mic className="h-5 w-5"/>}
               </Button>
-              <Button type="submit" size="icon" disabled={isLoading || !query.trim()} title="Send">
+              <Button type="submit" size="icon" disabled={isLoading || !query.trim() || isRecording} title="Send">
                   {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
               </Button>
             </div>

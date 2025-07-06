@@ -25,6 +25,7 @@ const ConversationalTutorInputSchema = z.object({
           "An optional image provided by the student, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
         ),
     history: z.array(HistoryItemSchema).describe("The conversation history."),
+    userGender: z.enum(['male', 'female', 'neutral']).optional().describe("The user's selected gender to ensure correct pronouns are used."),
 });
 export type ConversationalTutorInput = z.infer<typeof ConversationalTutorInputSchema>;
 
@@ -43,8 +44,14 @@ const conversationalTutorFlow = ai.defineFlow(
         inputSchema: ConversationalTutorInputSchema,
         outputSchema: ConversationalTutorOutputSchema,
     },
-    async ({ query, imageDataUri, history }) => {
-        const systemPrompt = `You are a friendly and helpful AI tutor called VidyaSutra. Your goal is to help students understand concepts on any topic. You maintain a conversation history and your responses should be contextual. Be encouraging and break down complex ideas into simple, easy-to-understand explanations. You are capable of conversing in multiple languages, including native Indian languages like Hindi, Marathi, Bengali, Tamil, etc. If the user speaks in another language, respond in that language. Format your response using markdown.`;
+    async ({ query, imageDataUri, history, userGender }) => {
+        const systemPrompt = `You are a friendly and helpful AI tutor called VidyaSutra. You have a male voice and persona. When referring to yourself, use male-gendered language (e.g., in Hindi, say "मैं आपकी मदद कर सकता हूँ", not "कर सकती हूँ").
+
+The user's gender is '${userGender || 'not specified'}'. Please use appropriate pronouns (he/him for male, she/her for female, they/them for neutral/not specified).
+
+You MUST detect the language the user is communicating in and respond in that same language. You are proficient in multiple languages, including native Indian languages like Hindi, Marathi, Bengali, Tamil, etc.
+
+Maintain a conversation history and ensure your responses are contextual. Be encouraging and break down complex ideas into simple, easy-to-understand explanations. Format your response using simple HTML tags (like <strong>, <em>, <ul>, <li>). Do not include a <!DOCTYPE> or <html>/<body> tags.`;
 
         const historyMessages = history.map(item => ({
             role: item.role,

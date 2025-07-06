@@ -17,7 +17,8 @@ const HistoryItemSchema = z.object({
 });
 
 const TeacherAssistantInputSchema = z.object({
-    query: z.string().describe("The teacher's current question or prompt."),
+    query: z.string().optional().describe("The teacher's current text message."),
+    audioDataUri: z.string().optional().describe("The teacher's current audio message as a data URI."),
     imageDataUri: z
         .string()
         .nullable()
@@ -26,6 +27,8 @@ const TeacherAssistantInputSchema = z.object({
           "An optional image provided by the teacher, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
         ),
     history: z.array(HistoryItemSchema).describe("The conversation history."),
+}).refine(data => data.query || data.audioDataUri, {
+  message: "Either a text query or an audio message must be provided.",
 });
 export type TeacherAssistantInput = z.infer<typeof TeacherAssistantInputSchema>;
 
@@ -45,20 +48,34 @@ const teacherAssistantFlow = ai.defineFlow(
         inputSchema: TeacherAssistantInputSchema,
         outputSchema: TeacherAssistantOutputSchema,
     },
-    async ({ query, imageDataUri, history }) => {
-        const systemPrompt = `You are ShikshaSahayak, a helpful and creative AI assistant for teachers. Your role is to help with brainstorming lesson ideas, creating educational content, simplifying complex topics for various grade levels, providing teaching strategies, and answering any educational questions. You are multilingual and can converse in native Indian languages like Hindi, Marathi, etc. If the user speaks in another language, respond in that language. Format your responses using markdown. Keep responses helpful and concise.`;
+    async ({ query, audioDataUri, imageDataUri, history }) => {
+        const systemPrompt = `You are ShikshaSahayak, a helpful and creative AI assistant for teachers. You have a male voice and persona. When referring to yourself, use male-gendered language (e.g., in Hindi, say "मैं आपकी मदद कर सकता हूँ", not "कर सकती हूँ").
+
+Your role is to help with brainstorming lesson ideas, creating educational content, simplifying complex topics, and teaching strategies.
+
+You MUST detect the language the user is communicating in (whether through text or audio) and respond in that same language. You are proficient in multiple languages, including native Indian languages like Hindi, Marathi, Bengali, Tamil, etc.
+
+Format your responses using simple HTML tags (like <strong>, <em>, <ul>, <li>). Do not include a <!DOCTYPE> or <html>/<body> tags. Keep responses helpful and concise.`;
 
         const historyMessages = history.map(item => ({
             role: item.role,
             content: [{ text: item.content }]
         }));
         
-        const userContent: ({text: string} | {media?: {url: string}})[] = [{ text: query }];
+        const userContent: ({text: string} | {media?: {url: string}})[] = [];
+        if (audioDataUri) {
+            userContent.push({ media: { url: audioDataUri } });
+            userContent.push({ text: "The user has provided an audio message. Please analyze it, determine the language, and provide a helpful response in that same language." });
+        } else {
+            userContent.push({ text: query! });
+        }
+
         if (imageDataUri) {
             userContent.push({ media: { url: imageDataUri } });
         }
         
         const llmResponse = await ai.generate({
+            model: 'googleai/gemini-1.5-flash',
             system: systemPrompt,
             history: historyMessages,
             prompt: userContent,
@@ -66,29 +83,33 @@ const teacherAssistantFlow = ai.defineFlow(
 
         const textResponse = llmResponse.text ?? "I am sorry, I could not generate a response.";
         
-        // Convert the text response to audio
-        const {media} = await ai.generate({
-          model: 'googleai/gemini-2.5-flash-preview-tts',
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {voiceName: 'Algenib'},
+        // Convert the text response to audio, handling potential rate-limit errors
+        let wavAudio = '';
+        try {
+            const {media} = await ai.generate({
+              model: 'googleai/gemini-2.5-flash-preview-tts',
+              config: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {voiceName: 'Algenib'},
+                  },
+                },
               },
-            },
-          },
-          prompt: textResponse,
-        });
+              prompt: textResponse.replace(/<[^>]*>?/gm, ''), // Strip HTML tags for TTS
+            });
 
-        if (!media) {
-          throw new Error('No media returned from TTS.');
+            if (media) {
+                const audioBuffer = Buffer.from(
+                  media.url.substring(media.url.indexOf(',') + 1),
+                  'base64'
+                );
+                wavAudio = 'data:audio/wav;base64,' + (await toWav(audioBuffer));
+            }
+        } catch(e) {
+            console.error("TTS generation failed, likely due to rate limiting. Returning text only.", e);
+            // wavAudio is already an empty string, so we gracefully continue
         }
-
-        const audioBuffer = Buffer.from(
-          media.url.substring(media.url.indexOf(',') + 1),
-          'base64'
-        );
-        const wavAudio = 'data:audio/wav;base64,' + (await toWav(audioBuffer));
 
         return {
           response: textResponse,

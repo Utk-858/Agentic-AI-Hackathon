@@ -1,5 +1,9 @@
 import StudentAgent from '@/components/agents/StudentAgent';
 import MultimodalGenerator from '@/components/agents/MultimodalGenerator';
+import { Suspense } from 'react';
+import { Card, CardContent, CardHeader, CardTitle,CardDescription } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+
 
 export default function VidyaSutraPage() {
   return (
@@ -13,7 +17,24 @@ export default function VidyaSutraPage() {
           <MultimodalGenerator />
         </div>
         <div className="h-full min-h-0 lg:col-span-1">
-          <StudentAgent />
+          <Suspense fallback={
+            <Card className="w-full h-full flex flex-col">
+              <CardHeader>
+                <CardTitle>Loading Assistant...</CardTitle>
+                <CardDescription>Please wait</CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col gap-4 min-h-0">
+                  <div className="flex-1 space-y-4">
+                    <Skeleton className="h-16 w-3/4" />
+                    <div className="flex justify-end"><Skeleton className="h-16 w-3/4" /></div>
+                    <Skeleton className="h-16 w-3/4" />
+                  </div>
+                  <Skeleton className="h-10 w-full" />
+              </CardContent>
+            </Card>
+          }>
+            <StudentAgent />
+          </Suspense>
         </div>
       </div>
     </div>

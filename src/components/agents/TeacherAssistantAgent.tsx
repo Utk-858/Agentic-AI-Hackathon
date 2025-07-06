@@ -5,9 +5,9 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Loader2, Mic, Send, Play, Pause, FileImage, X } from 'lucide-react';
+import { Loader2, Mic, Send, Play, Pause, FileImage, X, Square } from 'lucide-react';
 import { teacherAssistant } from '@/ai/flows/teacher-assistant';
-import MarkdownRenderer from '../MarkdownRenderer';
+import HtmlRenderer from '../HtmlRenderer';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -32,10 +32,13 @@ export default function TeacherAssistantAgent() {
   const [query, setQuery] = useState('');
   const [imageDataUri, setImageDataUri] = useState<string | null>(null);
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ isPlaying: false, messageIndex: null });
-
+  const [isRecording, setIsRecording] = useState(false);
+  
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -91,21 +94,27 @@ export default function TeacherAssistantAgent() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() && !imageDataUri) return;
-
+  const submitQuery = async ({ audioDataUri }: { audioDataUri?: string }) => {
     stopCurrentAudio();
     setIsLoading(true);
 
-    const userMessage: Message = { role: 'user', content: query, image: imageDataUri };
+    const userMessage: Message = { 
+      role: 'user', 
+      content: audioDataUri ? '[Audio Message]' : query, 
+      image: imageDataUri 
+    };
     const newMessages: Message[] = [...messages, userMessage];
     setMessages(newMessages);
 
     const history = messages.map(({ role, content }) => ({ role, content }));
 
     try {
-      const result = await teacherAssistant({ query, history, imageDataUri });
+      const result = await teacherAssistant({ 
+        query: audioDataUri ? undefined : query,
+        audioDataUri,
+        history, 
+        imageDataUri,
+      });
       setMessages(prev => [...prev, { role: 'model', content: result.response, media: result.media }]);
     } catch (error) {
       console.error(error);
@@ -117,9 +126,60 @@ export default function TeacherAssistantAgent() {
       setMessages(messages);
     } finally {
       setIsLoading(false);
-      setQuery('');
-      removeImage();
+      if (!audioDataUri) {
+        setQuery('');
+        removeImage();
+      }
     }
+  };
+
+  const startRecording = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+    
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const options = { mimeType: 'audio/webm' };
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+      };
+      
+      mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: options.mimeType });
+          const reader = new FileReader();
+          reader.readAsDataURL(audioBlob);
+          reader.onloadend = () => {
+              const base64Audio = reader.result as string;
+              if (base64Audio) submitQuery({ audioDataUri: base64Audio });
+          };
+          stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing microphone:", err);
+      toast({
+          variant: 'destructive',
+          title: 'Microphone access denied',
+          description: 'Please allow microphone access in your browser settings to use this feature.',
+      });
+    }
+  };
+
+  const handleTextSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim() && !imageDataUri) return;
+    submitQuery({});
   };
 
   return (
@@ -148,7 +208,7 @@ export default function TeacherAssistantAgent() {
                         {message.image && (
                             <Image src={message.image} alt="User upload" width={200} height={200} className="rounded-md" />
                         )}
-                        {message.content && <MarkdownRenderer content={message.content} className="bg-transparent p-0" />}
+                        {message.content && <HtmlRenderer content={message.content} className="bg-transparent p-0" />}
                     </div>
                   {message.role === 'model' && message.media && (
                     <Button onClick={() => togglePlayback(index, message.media!)} size="icon" variant="ghost" className="shrink-0">
@@ -171,7 +231,7 @@ export default function TeacherAssistantAgent() {
           </div>
         </ScrollArea>
         <div className="pt-2">
-          <form onSubmit={handleSubmit} className="space-y-2">
+          <form onSubmit={handleTextSubmit} className="space-y-2">
              {imageDataUri && (
                 <div className="relative w-24 h-24 rounded-md overflow-hidden border">
                     <Image src={imageDataUri} alt="Image preview" layout="fill" objectFit="cover" />
@@ -188,21 +248,21 @@ export default function TeacherAssistantAgent() {
             )}
             <div className="relative">
                 <Textarea
-                placeholder="Ask for ideas, simplify a topic..."
+                placeholder="Ask for ideas, simplify a topic, or use the mic..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 rows={1}
-                className="pr-[110px] min-h-[40px]"
+                className="pr-[150px] min-h-[40px]"
                 onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
                     e.preventDefault();
-                    handleSubmit(e as any);
+                    handleTextSubmit(e as any);
                     }
                 }}
-                disabled={isLoading}
+                disabled={isLoading || isRecording}
                 />
                 <div className="absolute top-1/2 -translate-y-1/2 right-2 flex items-center gap-1">
-                    <Button type="button" size="icon" variant="ghost" onClick={() => fileInputRef.current?.click()} title="Attach image" disabled={isLoading}>
+                    <Button type="button" size="icon" variant="ghost" onClick={() => fileInputRef.current?.click()} title="Attach image" disabled={isLoading || isRecording}>
                        <FileImage className="h-5 w-5"/>
                     </Button>
                      <input
@@ -211,11 +271,12 @@ export default function TeacherAssistantAgent() {
                         onChange={handleFileChange}
                         accept="image/*"
                         className="hidden"
+                        disabled={isLoading || isRecording}
                      />
-                    <Button type="button" size="icon" variant="ghost" disabled title="Voice input coming soon">
-                        <Mic className="h-5 w-5"/>
+                    <Button type="button" size="icon" variant="ghost" onClick={startRecording} disabled={isLoading} title={isRecording ? "Stop Recording" : "Start Recording"}>
+                        {isRecording ? <Square className="h-5 w-5 fill-red-500 text-red-500 animate-pulse" /> : <Mic className="h-5 w-5"/>}
                     </Button>
-                    <Button type="submit" size="icon" disabled={isLoading || (!query.trim() && !imageDataUri)} title="Send">
+                    <Button type="submit" size="icon" disabled={isLoading || (!query.trim() && !imageDataUri) || isRecording} title="Send">
                         {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
                     </Button>
                 </div>

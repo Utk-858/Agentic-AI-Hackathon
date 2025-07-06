@@ -1,4 +1,3 @@
-// This file uses server-side code.
 'use server';
 
 /**
@@ -19,6 +18,7 @@ const SimplifyContentInputSchema = z.object({
     .optional()
     .describe('The target audience for the simplified text (e.g., elementary school students).'),
   language: z.string().describe('The language to simplify the content into.'),
+  specialRequest: z.string().optional().describe('Any special requests or other important considerations, e.g., "focus on the main idea" or "use a formal tone".'),
 });
 export type SimplifyContentInput = z.infer<typeof SimplifyContentInputSchema>;
 
@@ -37,8 +37,8 @@ const simplifyContentFlow = ai.defineFlow(
     inputSchema: SimplifyContentInputSchema,
     outputSchema: SimplifyContentOutputSchema,
   },
-  async ({ complexText, targetAudience, language }) => {
-    const prompt = `You are an expert at simplifying complex text for different audiences in various languages.
+  async ({ complexText, targetAudience, language, specialRequest }) => {
+    let prompt = `You are an expert at simplifying complex text for different audiences in various languages.
 
 Simplify the following text into ${language}.
 The target audience is: ${targetAudience}.
@@ -46,9 +46,13 @@ The target audience is: ${targetAudience}.
 Complex Text:
 """
 ${complexText}
-"""
+"""`;
 
-Provide only the simplified text as a direct response, without any extra commentary. Format the output using markdown.`;
+    if (specialRequest) {
+      prompt += `\n\nSpecial Request: "${specialRequest}"\nPlease take this special request into account.`;
+    }
+
+    prompt += `\n\nProvide only the simplified text as a direct response, without any extra commentary. Format the output using simple HTML tags like <p>, <strong>, and <ul>/<li> for clarity. Do not include a <!DOCTYPE> or <html>/<body> tags.`;
     
     const result = await ai.generate({
       prompt: prompt,

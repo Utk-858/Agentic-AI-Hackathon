@@ -14,10 +14,9 @@ interface NavItem {
 
 interface AppSidebarProps {
   navItems: NavItem[];
-  role: 'Student' | 'Teacher';
 }
 
-export default function AppSidebar({ navItems, role }: AppSidebarProps) {
+export default function AppSidebar({ navItems }: AppSidebarProps) {
   const pathname = usePathname();
 
   return (
@@ -49,7 +48,7 @@ export default function AppSidebar({ navItems, role }: AppSidebarProps) {
           className="flex items-center gap-3 rounded-lg px-3 py-2 text-muted-foreground transition-all hover:bg-muted hover:text-primary"
         >
           <LogOut className="h-5 w-5" />
-          <span>Switch User</span>
+          <span>New User</span>
         </Link>
       </div>
     </aside>

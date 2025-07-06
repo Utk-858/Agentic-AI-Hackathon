@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import DailyDose from '@/components/DailyDose';
-import { ArrowRight, BrainCircuit, Clock, HeartPulse, PencilRuler } from 'lucide-react';
+import { ArrowRight, BrainCircuit, Clock, HeartPulse, PencilRuler, CalendarDays } from 'lucide-react';
 
 function TeacherDashboardContent() {
     const searchParams = useSearchParams();
@@ -67,15 +67,15 @@ function TeacherDashboardContent() {
                         <CardTitle>Your ShikshaSahayak AI Toolkit</CardTitle>
                         <CardDescription>How can I assist you today?</CardDescription>
                     </CardHeader>
-                    <CardContent className="grid gap-4 sm:grid-cols-1 md:grid-cols-3">
+                    <CardContent className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
                         <Link href="/teacher/vidyasutra" className="h-full">
                              <div className="p-4 bg-background rounded-lg border hover:bg-muted cursor-pointer h-full flex flex-col justify-between transition-colors">
                                 <div>
                                     <div className="flex items-center gap-2 mb-2">
                                         <PencilRuler className="w-6 h-6 text-primary"/>
-                                        <h3 className="font-headline text-lg font-semibold">Content Generators</h3>
+                                        <h3 className="font-headline text-lg font-semibold">Content Tools</h3>
                                     </div>
-                                    <p className="text-sm text-muted-foreground">Generate lesson plans, create worksheets, and simplify content.</p>
+                                    <p className="text-sm text-muted-foreground">Generate lesson plans, create worksheets, simplify content, and auto-grade submissions.</p>
                                 </div>
                                 <div className="text-primary font-semibold flex items-center gap-1 mt-4">
                                     Start creating <ArrowRight className="w-4 h-4" />
@@ -93,6 +93,20 @@ function TeacherDashboardContent() {
                                 </div>
                                 <div className="text-primary font-semibold flex items-center gap-1 mt-4">
                                     Start chatting <ArrowRight className="w-4 h-4" />
+                                </div>
+                            </div>
+                        </Link>
+                        <Link href="/teacher/timetable" className="h-full">
+                            <div className="p-4 bg-background rounded-lg border hover:bg-muted cursor-pointer h-full flex flex-col justify-between transition-colors">
+                                <div>
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <CalendarDays className="w-6 h-6 text-primary"/>
+                                        <h3 className="font-headline text-lg font-semibold">Timetable Generator</h3>
+                                    </div>
+                                    <p className="text-sm text-muted-foreground">Automatically generate optimized, clash-free school schedules.</p>
+                                </div>
+                                <div className="text-primary font-semibold flex items-center gap-1 mt-4">
+                                    Build schedule <ArrowRight className="w-4 h-4" />
                                 </div>
                             </div>
                         </Link>

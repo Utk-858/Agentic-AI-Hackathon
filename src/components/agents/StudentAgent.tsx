@@ -5,13 +5,14 @@ import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, Mic, Send, X, FileImage, BrainCircuit } from 'lucide-react';
 import { conversationalTutor } from '@/ai/flows/conversational-tutor';
-import MarkdownRenderer from '../MarkdownRenderer';
+import HtmlRenderer from '../HtmlRenderer';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
@@ -31,6 +32,8 @@ const StudentAgent = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const searchParams = useSearchParams();
+  const userGender = searchParams.get('gender') as 'male' | 'female' | 'neutral' | null;
 
   const tutorSchema = z.object({
     query: z.string(),
@@ -92,6 +95,7 @@ const StudentAgent = () => {
         query,
         imageDataUri,
         history,
+        userGender: userGender || 'neutral',
       });
       setMessages(prev => [...prev, { role: 'model', content: result.response }]);
     } catch (error) {
@@ -144,7 +148,7 @@ const StudentAgent = () => {
                     <Image src={message.image} alt="User upload" width={200} height={200} className="rounded-md mb-2" />
                   )}
                   <div className="prose prose-sm text-inherit max-w-none">
-                    <MarkdownRenderer content={message.content} className="bg-transparent p-0" />
+                    <HtmlRenderer content={message.content} className="bg-transparent p-0" />
                   </div>
                 </div>
               </div>

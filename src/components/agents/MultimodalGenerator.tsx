@@ -11,7 +11,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, FileImage, X, Mic, Wand2 } from 'lucide-react';
 import { multimodalTutor, MultimodalTutorOutput } from '@/ai/flows/multimodal-tutor';
-import MarkdownRenderer from '../MarkdownRenderer';
+import HtmlRenderer from '../HtmlRenderer';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '../ui/scroll-area';
 
@@ -161,7 +161,7 @@ export default function MultimodalGenerator() {
             <>
               <h3 className="text-lg font-semibold mb-2">Generated Result</h3>
               <ScrollArea className="flex-1 w-full rounded-md border">
-                <MarkdownRenderer content={result.response} className="bg-transparent p-4"/>
+                <HtmlRenderer content={result.response} className="bg-transparent p-4"/>
               </ScrollArea>
             </>
           )}

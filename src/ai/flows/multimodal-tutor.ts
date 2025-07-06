@@ -44,7 +44,7 @@ They have also provided an image for context.
 Image: {{media url=imageDataUri}}
 {{/if}}
 
-Please provide a clear, concise, and helpful response to the student's query. Format your response using markdown.`,
+Please provide a clear, concise, and helpful response to the student's query. Format your response using simple HTML tags (like <strong>, <em>, <ul>, <li>). Do not include a <!DOCTYPE> or <html>/<body> tags.`,
 });
 
 const multimodalTutorFlow = ai.defineFlow(
