@@ -242,7 +242,3 @@ export default function ChalkboardScannerPage() {
             </CardContent>
           </Card>
         </div>
-      </div>
-    </div>
-  );
-}
