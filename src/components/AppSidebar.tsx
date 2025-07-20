@@ -20,7 +20,7 @@ export default function AppSidebar({ navItems }: AppSidebarProps) {
   const pathname = usePathname();
 
   return (
-    <aside className="hidden h-screen w-56 flex-col border-r bg-card sm:sticky sm:top-0 sm:flex">
+    <aside className="h-screen w-56 flex flex-col border-r bg-card sm:sticky sm:top-0">
       <nav className="flex flex-1 flex-col gap-4 px-4 sm:py-5">
         <Link href="/" className="flex items-center gap-2 px-2.5 font-semibold">
           <Logo className="h-8 w-8 text-primary" />
