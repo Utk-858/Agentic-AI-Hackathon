@@ -1,0 +1,10 @@
+const worker = Tesseract.createWorker({
+  corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
+  workerPath: '/tesseract/worker.min.js',
+  langPath: '/tesseract/lang-data/',
+});
+await worker.load();
+await worker.loadLanguage('eng');
+await worker.initialize('eng');
+const { data } = await worker.recognize(imageDataUri);
+await worker.terminate();

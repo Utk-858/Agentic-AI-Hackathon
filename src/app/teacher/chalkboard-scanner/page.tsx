@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, ChangeEvent } from 'react';
+import React from 'react';
+import { useRef, ChangeEvent, useEffect, useState } from 'react';
 import Image from 'next/image';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -14,14 +15,30 @@ import HtmlRenderer from '@/components/HtmlRenderer';
 import { chalkboardScanner } from '@/ai/flows/chalkboard-scanner';
 import { useTeacherState } from '@/context/TeacherStateContext';
 
+// Remove global Tesseract import logic
+
 export default function ChalkboardScannerPage() {
   const { state, setChalkboardScannerState } = useTeacherState();
   const { result, isLoading, imageDataUri } = state.chalkboardScanner;
-  
+
   const { toast } = useToast();
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [isOnline, setIsOnline] = useState(true);
+  const [isTtsPlaying, setIsTtsPlaying] = useState(false);
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -37,11 +54,11 @@ export default function ChalkboardScannerPage() {
       reader.readAsDataURL(file);
     }
   };
-  
+
   const handleRemoveImage = () => {
     setChalkboardScannerState({ imageDataUri: null, result: null });
-    if(inputRef.current) inputRef.current.value = '';
-    if(audioRef.current) audioRef.current.pause();
+    if (inputRef.current) inputRef.current.value = '';
+    if (audioRef.current) audioRef.current.pause();
   };
 
   const handleScan = async () => {
@@ -50,10 +67,56 @@ export default function ChalkboardScannerPage() {
       return;
     }
     setChalkboardScannerState({ isLoading: true, result: null });
-    if(audioRef.current) audioRef.current.pause();
+    if (audioRef.current) audioRef.current.pause();
 
     try {
-      const response = await chalkboardScanner({ imageDataUri });
+      let response;
+      if (isOnline) {
+        // Online: Use Gemini as before
+        response = await chalkboardScanner({ imageDataUri });
+      } else {
+        // Offline: Dynamically import Tesseract.js here
+        try {
+          console.log('Offline scan triggered. imageDataUri:', imageDataUri?.slice(0, 100));
+          const TesseractModule = await import('tesseract.js');
+          console.log('TesseractModule:', TesseractModule);
+          const Tesseract = TesseractModule.default || TesseractModule;
+          response = await new Promise<{ htmlContent: string; audioDataUri: string }>((resolve, reject) => {
+            Tesseract.recognize(
+              imageDataUri,
+              'eng',
+              {
+                logger: (m: any) => { console.log('Tesseract progress:', m); },
+                workerPath: '/tesseract/worker.min.js',
+                corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
+                langPath: '/tesseract/lang-data/', // Make sure eng.traineddata.gz is in this folder
+              }
+            ).then(({ data }: { data: { text: string } }) => {
+              const htmlContent = `<p>${data.text.replace(/\n/g, '<br/>')}</p>`;
+              let audioDataUri = '';
+              if ('speechSynthesis' in window) {
+                const utterance = new window.SpeechSynthesisUtterance(data.text);
+                utterance.onstart = () => setIsTtsPlaying(true);
+                utterance.onend = () => setIsTtsPlaying(false);
+                window.speechSynthesis.speak(utterance);
+              }
+              resolve({ htmlContent, audioDataUri });
+            }).catch((err: any) => {
+              console.error('Tesseract recognize error:', err);
+              reject(err);
+            });
+          });
+        } catch (err: any) {
+          console.error('Offline OCR process failed:', err);
+          toast({
+            variant: 'destructive',
+            title: 'Offline OCR Error',
+            description: err?.message || JSON.stringify(err) || 'Failed to run offline OCR. See console for details.',
+          });
+          setChalkboardScannerState({ result: null });
+          return;
+        }
+      }
       setChalkboardScannerState({ result: response });
       toast({ title: 'Scan complete!', description: 'Digital notes and audio have been generated.' });
     } catch (error: any) {
@@ -68,7 +131,7 @@ export default function ChalkboardScannerPage() {
       setChalkboardScannerState({ isLoading: false });
     }
   };
-  
+
   const handleDownloadPdf = () => {
     const input = contentRef.current;
     if (input) {
@@ -94,35 +157,35 @@ export default function ChalkboardScannerPage() {
     if (isLoading) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-8">
-            <Loader2 className="w-12 h-12 mb-4 animate-spin text-primary"/>
-            <p className="text-lg font-medium">Scanning chalkboard...</p>
-            <p>AI is converting image to notes and audio.</p>
+          <Loader2 className="w-12 h-12 mb-4 animate-spin text-primary" />
+          <p className="text-lg font-medium">Scanning chalkboard...</p>
+          <p>AI is converting image to notes and audio.</p>
         </div>
       );
     }
     if (!result) {
       return (
         <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-8">
-            <Bot className="w-12 h-12 mb-4"/>
-            <p className="text-lg font-medium">Your digital notes will appear here.</p>
-            <p>Upload a chalkboard image and click "Scan" to begin.</p>
+          <Bot className="w-12 h-12 mb-4" />
+          <p className="text-lg font-medium">Your digital notes will appear here.</p>
+          <p>Upload a chalkboard image and click "Scan" to begin.</p>
         </div>
       );
     }
-    
+
     return (
-        <div ref={contentRef} className="p-4">
-          <HtmlRenderer content={result.htmlContent} />
-        </div>
+      <div ref={contentRef} className="p-4">
+        <HtmlRenderer content={result.htmlContent} />
+      </div>
     );
   }
 
   return (
     <div className="flex-1 p-4 md:p-6 flex flex-col">
-       <div className="mb-6">
-            <h1 className="font-headline text-2xl font-bold">Chalkboard Scanner</h1>
-            <p className="text-muted-foreground">Instantly convert a picture of any blackboard, whiteboard, or note into clean digital text and audio.</p>
-        </div>
+      <div className="mb-6 flex items-center gap-4">
+        <h1 className="font-headline text-2xl font-bold">Chalkboard Scanner</h1>
+        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isOnline ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{isOnline ? 'Online' : 'Offline'}</span>
+      </div>
       <div className="grid flex-1 grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
           <Card>
@@ -140,7 +203,7 @@ export default function ChalkboardScannerPage() {
                     </Button>
                   </div>
                 ) : (
-                  <div 
+                  <div
                     className="flex items-center justify-center w-full aspect-video border-2 border-dashed rounded-md cursor-pointer hover:bg-muted"
                     onClick={() => !isLoading && inputRef.current?.click()}
                   >
@@ -165,10 +228,10 @@ export default function ChalkboardScannerPage() {
               <CardTitle className="font-headline">Digital Notes</CardTitle>
               {result && (
                 <div className="flex items-center gap-2">
-                    {result.audioDataUri && <audio ref={audioRef} src={result.audioDataUri} controls />}
-                    <Button size="sm" variant="outline" onClick={handleDownloadPdf}>
-                      <Download className="mr-2 h-4 w-4" /> PDF
-                    </Button>
+                  {result.audioDataUri && <audio ref={audioRef} src={result.audioDataUri} controls />}
+                  <Button size="sm" variant="outline" onClick={handleDownloadPdf}>
+                    <Download className="mr-2 h-4 w-4" /> PDF
+                  </Button>
                 </div>
               )}
             </CardHeader>
