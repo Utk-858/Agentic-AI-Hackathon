@@ -9,29 +9,29 @@ import type { GenerateTimetableOutput } from '@/ai/schemas';
 
 // State for Vidyasutra page
 interface TextResult {
-    type: 'lessonPlan' | 'worksheet' | 'simplify';
-    title: string;
-    content: string;
-    answerKey?: string;
+  type: 'lessonPlan' | 'worksheet' | 'simplify';
+  title: string;
+  content: string;
+  answerKey?: string;
 }
 interface CorrectorResult {
-    type: 'corrector';
-    title:string;
-    score: number;
-    total: number;
-    feedback: string;
+  type: 'corrector';
+  title: string;
+  score: number;
+  total: number;
+  feedback: string;
 }
 type GenerationResult = TextResult | CorrectorResult;
 
 interface VidyasutraState {
-    result: GenerationResult | null;
-    isLoading: Record<string, boolean>;
-    studentSheetUri: string | null;
-    answerKeyUri: string | null;
-    studentInfo: { name: string; classVal: string; rollNo: string; language: string; specialRequest: string };
-    isEditing: boolean;
-    editableContent: string;
-    showAnswerKey: boolean;
+  result: GenerationResult | null;
+  isLoading: Record<string, boolean>;
+  studentSheetUri: string | null;
+  answerKeyUri: string | null;
+  studentInfo: { name: string; classVal: string; rollNo: string; language: string; specialRequest: string };
+  isEditing: boolean;
+  editableContent: string;
+  showAnswerKey: boolean;
 }
 
 // State for Blackboard Designer page
@@ -48,8 +48,20 @@ interface ChalkboardScannerState {
 }
 
 // State for Timetable page
+interface TimetableEntry {
+  time: string;
+  class: string;
+  subject: string;
+  teacher: string;
+  room: string;
+}
+
+interface TimetableResult {
+  timetable: Record<string, TimetableEntry[]>;
+}
+
 interface TimetableState {
-  result: GenerateTimetableOutput | null;
+  result: TimetableResult | null;
   isLoading: boolean;
   isPreviewOpen: boolean;
 }
