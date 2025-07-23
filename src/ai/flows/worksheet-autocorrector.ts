@@ -12,11 +12,73 @@ import {
   type WorksheetAutoCorrectorOutput,
   WorksheetAutoCorrectorOutputSchema,
 } from '@/ai/schemas';
+import { callOllamaGemma } from '@/ai/ollama';
 
 export async function worksheetAutoCorrector(
-  input: WorksheetAutoCorrectorInput
+  input: WorksheetAutoCorrectorInput & { isOnline: boolean }
 ): Promise<WorksheetAutoCorrectorOutput> {
-  return worksheetAutoCorrectorFlow(input);
+  if (input.isOnline) {
+    return worksheetAutoCorrectorFlow(input);
+  } else {
+    // Reconstruct the prompt as in the original flow
+    const promptText = `You are an expert teacher and grader. You will be given two images:
+- The first image is a student's completed worksheet.
+- The second image is the answer key for the worksheet.
+
+Instructions:
+1. Extract the text from both images.
+2. Compare the student's answers to the answer key.
+3. Grade the worksheet, giving a score out of the total number of questions.
+4. List the questions the student got wrong, and provide brief feedback for each.
+5. Return ONLY a valid JSON object in this format (all values must be numbers or strings, not objects):
+{
+  "score": <number>,
+  "total": <number>,
+  "wrongQuestions": [
+    {
+      "questionNumber": <number>,
+      "studentAnswer": "<text>",
+      "correctAnswer": "<text>",
+      "feedback": "<text>"
+    }
+  ]
+}
+Do not include any explanations, comments, or extra text. All values must be numbers or strings as shown.
+${input.specialRequest ? `Special Grading Instructions: Please follow these special requests while grading: "${input.specialRequest}"` : ''}
+
+Now, please grade the worksheet and provide the score and feedback in ${input.language}.
+`;
+
+    // Send both prompt and images to Ollama (vision model)
+    const responseText = await callOllamaGemma(
+      promptText,
+      [input.studentWorksheetDataUri, input.answerKeyDataUri]
+    );
+
+    try {
+      const match = responseText.match(/\{[\s\S]*\}/);
+      if (match) {
+        const result = JSON.parse(match[0]);
+        // Defensive parsing: ensure score and total are numbers
+        if (typeof result.score !== 'number') {
+          result.score = Number(result.score) || 0;
+        }
+        if (typeof result.total !== 'number') {
+          if (typeof result.total === 'object' && result.total !== null) {
+            // Try to find a number inside the object
+            const values = Object.values(result.total).filter(v => typeof v === 'number');
+            result.total = values.length > 0 ? values[0] : 0;
+          } else {
+            result.total = Number(result.total) || 0;
+          }
+        }
+        return result;
+      }
+      throw new Error('No JSON found in response');
+    } catch (err) {
+      throw new Error('Failed to parse grading result: ' + (err as Error).message);
+    }
+  }
 }
 
 const prompt = ai.definePrompt({

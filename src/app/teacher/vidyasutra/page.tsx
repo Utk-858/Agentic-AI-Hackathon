@@ -27,6 +27,7 @@ import { worksheetAutoCorrector } from '@/ai/flows/worksheet-autocorrector';
 import { useToast } from '@/hooks/use-toast';
 import HtmlRenderer from '@/components/HtmlRenderer';
 import { useTeacherState } from '@/context/TeacherStateContext';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 const lessonPlanSchema = z.object({
   topic: z.string().min(3, 'Topic is required.'),
@@ -94,6 +95,7 @@ export default function ShikshaSahayakPage() {
 
   const { toast } = useToast();
   const contentRef = useRef<HTMLDivElement>(null);
+  const { online } = useNetworkStatus();
 
   const lessonPlanForm = useForm<z.infer<typeof lessonPlanSchema>>({
     resolver: zodResolver(lessonPlanSchema),
@@ -146,9 +148,24 @@ export default function ShikshaSahayakPage() {
     }
   };
 
-  const handleLessonPlan = (values: z.infer<typeof lessonPlanSchema>) => handleGeneration('lessonPlan', () => generateLessonPlan(values), (r) => setVidyasutraState({ result: { type: 'lessonPlan', title: 'Lesson Plan', content: r.lessonPlan } }));
-  const handleWorksheet = (values: z.infer<typeof worksheetSchema>) => handleGeneration('worksheet', () => generateWorksheet(values), (r) => setVidyasutraState({ result: { type: 'worksheet', title: 'Worksheet', content: r.worksheet, answerKey: r.answerKey } }));
-  const handleSimplify = (values: z.infer<typeof simplifySchema>) => handleGeneration('simplify', () => simplifyContent(values), (r) => setVidyasutraState({ result: { type: 'simplify', title: 'Simplified Content', content: r.simplifiedText } }));
+  // Update handlers to use online status
+  const handleLessonPlan = (values: z.infer<typeof lessonPlanSchema>) => handleGeneration(
+    'lessonPlan',
+    () => generateLessonPlan(values, online),
+    (r) => setVidyasutraState({ result: { type: 'lessonPlan', title: 'Lesson Plan', content: r.lessonPlan } })
+  );
+
+  const handleWorksheet = (values: z.infer<typeof worksheetSchema>) => handleGeneration(
+    'worksheet',
+    () => generateWorksheet(values, online),
+    (r) => setVidyasutraState({ result: { type: 'worksheet', title: 'Worksheet', content: r.worksheet, answerKey: r.answerKey } })
+  );
+
+  const handleSimplify = (values: z.infer<typeof simplifySchema>) => handleGeneration(
+    'simplify',
+    () => simplifyContent(values, online),
+    (r) => setVidyasutraState({ result: { type: 'simplify', title: 'Simplified Content', content: r.simplifiedText } })
+  );
 
   const handleCorrector = () => {
     if (!studentSheetUri || !answerKeyUri) {
@@ -164,6 +181,7 @@ export default function ShikshaSahayakPage() {
         answerKeyDataUri: answerKeyUri, 
         language: studentInfo.language,
         specialRequest: studentInfo.specialRequest,
+        isOnline: online
     }), (r) => {
         setVidyasutraState({
             result: {
@@ -317,9 +335,21 @@ export default function ShikshaSahayakPage() {
 
   return (
     <div className="flex flex-1 flex-col">
-      <div className="p-4 md:p-6 border-b">
-        <h1 className="font-headline text-2xl font-bold">ShikshaSahayak: Content Creation Toolkit</h1>
-        <p className="text-muted-foreground">Your personal AI-powered toolkit for creating educational materials.</p>
+      <div className="p-4 md:p-6 border-b flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div>
+          <h1 className="font-headline text-2xl font-bold">ShikshaSahayak: Content Creation Toolkit</h1>
+          <p className="text-muted-foreground">Your personal AI-powered toolkit for creating educational materials.</p>
+        </div>
+        <div>
+          <button
+            type="button"
+            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition-colors duration-200 ${online ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'}`}
+            disabled
+          >
+            <svg className={`w-3 h-3 mr-1 ${online ? 'fill-green-500' : 'fill-yellow-500'}`} viewBox="0 0 8 8"><circle cx="4" cy="4" r="4"/></svg>
+            {online ? 'Online (Gemini)' : 'Offline (Gemma 3:4b)'}
+          </button>
+        </div>
       </div>
 
       <Tabs defaultValue="lesson-plan" className="p-4 md:p-6 flex-1 flex flex-col">
