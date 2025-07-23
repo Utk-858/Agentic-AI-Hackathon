@@ -97,6 +97,33 @@ function generateTimetableOffline(params: any) {
     };
 
     const days = Object.keys(timetable);
+    // Track teacher and room usage, and consecutive lectures
+    const teacherHours: Record<string, number> = {};
+    const classConsecutive: Record<string, number> = {};
+    const lastClassSlot: Record<string, string> = {};
+    const teacherLastSlot: Record<string, string> = {};
+
+    // Helper to check if a teacher is available and not over max hours
+    function canAssignTeacher(teacher: Teacher, day: string, slot: string) {
+        if (!teacher.subjects) return false;
+        if (!isTeacherAvailable(teacher, day, slot)) return false;
+        if ((teacherHours[teacher.name] || 0) >= teacher.maxHours) return false;
+        if (teacherLastSlot[teacher.name] === slot) return false; // Already assigned this slot
+        return true;
+    }
+
+    // Helper to check consecutive lectures for a class
+    function canAssignClass(className: string, slot: string) {
+        if (lastClassSlot[className] === slot) return false;
+        if ((classConsecutive[className] || 0) >= 3) return false;
+        return true;
+    }
+
+    // Helper to reset consecutive count if not consecutive slot
+    function updateConsecutive(className: string, prevSlot: string, currSlot: string) {
+        if (!prevSlot || prevSlot === currSlot) return;
+        classConsecutive[className] = 1;
+    }
 
     // For each day
     days.forEach((day: string) => {
@@ -113,11 +140,13 @@ function generateTimetableOffline(params: any) {
                 let assigned = false;
                 // Try to assign a subject/teacher/room
                 for (const subject of subjects) {
-                    const availableTeacher = findAvailableTeacher(faculty, subject, day, slot, timetable);
+                    // Prefer grouping labs together
+                    const isLab = subject.toLowerCase().includes('lab');
+                    const availableTeacher = faculty.find(t => t.subjects.includes(subject) && canAssignTeacher(t, day, slot));
                     if (!availableTeacher) continue;
-                    const availableRoom = findAvailableRoom(rooms, classInfo.students, timetable[day], slot);
+                    const availableRoom = rooms.find(r => r.capacity >= classInfo.students && (!isLab || r.type === 'lab'));
                     if (!availableRoom) continue;
-                    if (isSlotAvailable(timetable[day], slot, className)) {
+                    if (isSlotAvailable(timetable[day], slot, className) && canAssignClass(className, slot)) {
                         timetable[day].push({
                             time: slot,
                             subject,
@@ -125,6 +154,10 @@ function generateTimetableOffline(params: any) {
                             class: className,
                             room: availableRoom.name,
                         });
+                        teacherHours[availableTeacher.name] = (teacherHours[availableTeacher.name] || 0) + 1;
+                        lastClassSlot[className] = slot;
+                        teacherLastSlot[availableTeacher.name] = slot;
+                        classConsecutive[className] = (classConsecutive[className] || 0) + 1;
                         assigned = true;
                         break;
                     }
@@ -138,10 +171,16 @@ function generateTimetableOffline(params: any) {
                         class: className,
                         room: '-',
                     });
+                    classConsecutive[className] = 0;
                 }
             });
         });
     });
+
+    // Optionally: sort each day's entries by time slot order
+    for (const day of days) {
+        timetable[day].sort((a, b) => timeSlots.indexOf(a.time) - timeSlots.indexOf(b.time));
+    }
 
     return { timetable };
 }

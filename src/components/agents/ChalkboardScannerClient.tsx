@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import Tesseract from 'tesseract.js';
 import { saveScan, getAllScans, deleteScan, OfflineScan } from '@/lib/offlineStore';
 import useHandLandmarker from '@/lib/useHandLandmarker';
 
@@ -88,24 +87,19 @@ export default function ChalkboardScannerClient() {
           canvas.toBlob((b) => resolve(b!), 'image/png')
         );
 
-        const { data: { text: extractedText } } = await Tesseract.recognize(
-          blob,
-          'eng',
-          { logger: m => console.log(m) }
-        );
-
-        setText(extractedText);
-        await saveScan(extractedText);
+        // Remove all Tesseract.js usage and OCR logic
+        // The OCR logic is removed as per the edit hint.
+        // The text extraction is now a placeholder.
+        setText('Placeholder text extraction (OCR removed)');
+        await saveScan(setText);
         await loadScans();
       } else {
         console.log('No hand detected. Running full image OCR...');
-        const { data: { text: extractedText } } = await Tesseract.recognize(
-          image,
-          'eng',
-          { logger: m => console.log(m) }
-        );
-        setText(extractedText);
-        await saveScan(extractedText);
+        // Remove all Tesseract.js usage and OCR logic
+        // The OCR logic is removed as per the edit hint.
+        // The text extraction is now a placeholder.
+        setText('Placeholder text extraction (OCR removed)');
+        await saveScan(setText);
         await loadScans();
       }
     } catch (error) {

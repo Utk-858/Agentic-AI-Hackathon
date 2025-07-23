@@ -23,6 +23,7 @@ import type { GenerateTimetableInput } from '@/ai/schemas';
 import { useToast } from '@/hooks/use-toast';
 import { useTeacherState } from '@/context/TeacherStateContext';
 import { generateOfflineTimetable } from '@/lib/offline-timetable';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 interface TimetableEntry {
   time: string;
@@ -99,20 +100,7 @@ export default function TimetablePage() {
   const { result, isLoading, isPreviewOpen } = state.timetable;
   const { toast } = useToast();
   const timetableRef = useRef<HTMLDivElement>(null);
-  const [isOnline, setIsOnline] = useState(true);
-
-  // Add online/offline detection
-  useEffect(() => {
-    setIsOnline(navigator.onLine);
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+  const { online: isOnline } = useNetworkStatus();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -175,6 +163,7 @@ export default function TimetablePage() {
       };
 
       let response: TimetableResult;
+      console.log('onSubmit isOnline:', isOnline);
       if (isOnline) {
         // Online: Use AI-powered generation
         response = await generateTimetable(apiInput);

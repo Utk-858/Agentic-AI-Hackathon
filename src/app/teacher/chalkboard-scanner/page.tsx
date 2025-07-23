@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import HtmlRenderer from '@/components/HtmlRenderer';
 import { chalkboardScanner } from '@/ai/flows/chalkboard-scanner';
 import { useTeacherState } from '@/context/TeacherStateContext';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 // Remove global Tesseract import logic
 
@@ -25,11 +26,12 @@ export default function ChalkboardScannerPage() {
   const contentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [isOnline, setIsOnline] = useState(true);
+  const { online: isOnline } = useNetworkStatus();
   const [isTtsPlaying, setIsTtsPlaying] = useState(false);
+  const [ttsUtterance, setTtsUtterance] = useState<SpeechSynthesisUtterance | null>(null);
+  const [ttsText, setTtsText] = useState<string | null>(null);
 
   useEffect(() => {
-    setIsOnline(navigator.onLine);
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
@@ -61,6 +63,68 @@ export default function ChalkboardScannerPage() {
     if (audioRef.current) audioRef.current.pause();
   };
 
+  // Helper for offline: Tesseract OCR + Gemma refinement
+  async function runOfflineTesseractGemma(imageDataUri: string) {
+    // 1. OCR with Tesseract.js (browser only)
+    const TesseractModule = await import('tesseract.js');
+    const Tesseract = TesseractModule.default || TesseractModule;
+    const ocrResult = await Tesseract.recognize(
+      imageDataUri,
+      'eng',
+      {
+        logger: (m: any) => { console.log('Tesseract progress:', m); },
+        workerPath: '/tesseract/worker.min.js',
+        corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
+        langPath: '/tesseract/lang-data/',
+      }
+    );
+    const ocrText = ocrResult.data.text.trim();
+    if (!ocrText) throw new Error('Tesseract OCR did not extract any text.');
+    // 2. Refine with Gemma 3:4b via local API
+    const refineRes = await fetch('/api/gemma-refine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: ocrText }),
+    });
+    if (!refineRes.ok) throw new Error('Gemma refinement failed');
+    const { refinedText } = await refineRes.json();
+    const htmlContent = `<p>${refinedText.replace(/\n/g, '<br/>')}</p>`;
+    let audioDataUri = '';
+    if ('speechSynthesis' in window) {
+      const utterance = new window.SpeechSynthesisUtterance(refinedText);
+      utterance.onstart = () => setIsTtsPlaying(true);
+      utterance.onend = () => setIsTtsPlaying(false);
+      window.speechSynthesis.speak(utterance);
+    }
+    return { htmlContent, audioDataUri };
+  }
+
+  // Add TTS controls
+  const handleTtsPlay = () => {
+    if (!ttsText) return;
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    const utterance = new window.SpeechSynthesisUtterance(ttsText);
+    utterance.onstart = () => setIsTtsPlaying(true);
+    utterance.onend = () => setIsTtsPlaying(false);
+    setTtsUtterance(utterance);
+    window.speechSynthesis.speak(utterance);
+  };
+  const handleTtsPause = () => {
+    window.speechSynthesis.pause();
+    setIsTtsPlaying(false);
+  };
+  const handleTtsResume = () => {
+    window.speechSynthesis.resume();
+    setIsTtsPlaying(true);
+  };
+  const handleTtsStop = () => {
+    window.speechSynthesis.cancel();
+    setIsTtsPlaying(false);
+  };
+
+  // Main scan handler with online/offline toggle
   const handleScan = async () => {
     if (!imageDataUri) {
       toast({ variant: 'destructive', title: 'No Image', description: 'Please upload an image of a chalkboard to scan.' });
@@ -72,46 +136,34 @@ export default function ChalkboardScannerPage() {
     try {
       let response;
       if (isOnline) {
-        // Online: Use Gemini as before
+        // ONLINE: Use Gemini via backend
         response = await chalkboardScanner({ imageDataUri });
+        if (response && response.htmlContent) {
+          // Try to extract text from htmlContent for TTS
+          const div = document.createElement('div');
+          div.innerHTML = response.htmlContent;
+          setTtsText(div.innerText);
+        }
       } else {
-        // Offline: Dynamically import Tesseract.js here
+        // OFFLINE: System Tesseract OCR + Gemma 3:4b refinement via API
         try {
-          console.log('Offline scan triggered. imageDataUri:', imageDataUri?.slice(0, 100));
-          const TesseractModule = await import('tesseract.js');
-          console.log('TesseractModule:', TesseractModule);
-          const Tesseract = TesseractModule.default || TesseractModule;
-          response = await new Promise<{ htmlContent: string; audioDataUri: string }>((resolve, reject) => {
-            Tesseract.recognize(
-              imageDataUri,
-              'eng',
-              {
-                logger: (m: any) => { console.log('Tesseract progress:', m); },
-                workerPath: '/tesseract/worker.min.js',
-                corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
-                langPath: '/tesseract/lang-data/', // Make sure eng.traineddata.gz is in this folder
-              }
-            ).then(({ data }: { data: { text: string } }) => {
-              const htmlContent = `<p>${data.text.replace(/\n/g, '<br/>')}</p>`;
-              let audioDataUri = '';
-              if ('speechSynthesis' in window) {
-                const utterance = new window.SpeechSynthesisUtterance(data.text);
-                utterance.onstart = () => setIsTtsPlaying(true);
-                utterance.onend = () => setIsTtsPlaying(false);
-                window.speechSynthesis.speak(utterance);
-              }
-              resolve({ htmlContent, audioDataUri });
-            }).catch((err: any) => {
-              console.error('Tesseract recognize error:', err);
-              reject(err);
-            });
+          const apiRes = await fetch('/api/tesseract-gemma', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageDataUri }),
           });
+          if (!apiRes.ok) throw new Error('Tesseract+Gemma API failed');
+          const { refinedText, error } = await apiRes.json();
+          if (error) throw new Error(error);
+          const htmlContent = `<p>${refinedText.replace(/\n/g, '<br/>')}</p>`;
+          setTtsText(refinedText);
+          response = { htmlContent, audioDataUri: '' }; // No audio for offline
         } catch (err: any) {
-          console.error('Offline OCR process failed:', err);
+          console.error('Offline Tesseract+Gemma process failed:', err);
           toast({
             variant: 'destructive',
-            title: 'Offline OCR Error',
-            description: err?.message || JSON.stringify(err) || 'Failed to run offline OCR. See console for details.',
+            title: 'Offline Tesseract+Gemma Error',
+            description: err?.message || JSON.stringify(err) || 'Failed to run offline OCR+Gemma. See console for details.',
           });
           setChalkboardScannerState({ result: null });
           return;
@@ -176,6 +228,21 @@ export default function ChalkboardScannerPage() {
     return (
       <div ref={contentRef} className="p-4">
         <HtmlRenderer content={result.htmlContent} />
+        {ttsText && (
+          <div className="mt-4 flex gap-2 items-center">
+            <Button size="sm" variant="outline" onClick={isTtsPlaying ? handleTtsPause : handleTtsPlay}>
+              {isTtsPlaying ? 'Pause Voice' : 'Play Voice'}
+            </Button>
+            {isTtsPlaying && (
+              <Button size="sm" variant="outline" onClick={handleTtsResume}>
+                Resume
+              </Button>
+            )}
+            <Button size="sm" variant="destructive" onClick={handleTtsStop}>
+              Stop
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -184,7 +251,7 @@ export default function ChalkboardScannerPage() {
     <div className="flex-1 p-4 md:p-6 flex flex-col">
       <div className="mb-6 flex items-center gap-4">
         <h1 className="font-headline text-2xl font-bold">Chalkboard Scanner</h1>
-        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${isOnline ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{isOnline ? 'Online' : 'Offline'}</span>
+        {/* Removed local online/offline status button */}
       </div>
       <div className="grid flex-1 grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
@@ -242,3 +309,7 @@ export default function ChalkboardScannerPage() {
             </CardContent>
           </Card>
         </div>
+      </div>
+    </div>
+  );
+}

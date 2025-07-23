@@ -96,6 +96,8 @@ export default function ShikshaSahayakPage() {
   const { toast } = useToast();
   const contentRef = useRef<HTMLDivElement>(null);
   const { online } = useNetworkStatus();
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => { setHydrated(true); }, []);
 
   const lessonPlanForm = useForm<z.infer<typeof lessonPlanSchema>>({
     resolver: zodResolver(lessonPlanSchema),
@@ -193,7 +195,7 @@ export default function ShikshaSahayakPage() {
             score: r.score,
             total: r.total,
             feedback: r.feedback,
-          }
+          } as typeof r & { summaryTable?: string }
         });
       }
     );
@@ -280,9 +282,11 @@ export default function ShikshaSahayakPage() {
       );
     }
 
-    if (result.type === 'corrector') {
+    if (result && result.type === 'corrector') {
       const isFeedbackEditing = isEditing;
       const feedbackContent = isFeedbackEditing ? editableContent : result.feedback;
+      const hasScore = typeof result.score === 'number' && typeof result.total === 'number';
+      const showExtractionWarning = hasScore && result.total === 0;
       return (
         <div className="p-4" ref={contentRef}>
           <h2 className="text-2xl font-bold text-center mb-4">Grading Report</h2>
@@ -296,7 +300,12 @@ export default function ShikshaSahayakPage() {
           </Table>
           <div className="text-center p-4 bg-muted rounded-lg my-4">
             <p className="text-muted-foreground">Total Score</p>
-            <p className="text-4xl font-bold">{result.score} / {result.total}</p>
+            <p className="text-4xl font-bold">{hasScore ? `${result.score} / ${result.total}` : 'N/A'}</p>
+            {showExtractionWarning && (
+              <div className="mt-2 p-2 bg-yellow-100 text-yellow-900 rounded text-sm">
+                Could not extract any questions/answers. Please check the image quality or try again.
+              </div>
+            )}
           </div>
           {isFeedbackEditing ? (
             <Textarea
@@ -306,14 +315,14 @@ export default function ShikshaSahayakPage() {
               placeholder="Edit feedback..."
             />
           ) : (
-            <HtmlRenderer content={result.feedback} />
+            <HtmlRenderer content={result.feedback || ''} />
           )}
         </div>
       );
     }
 
     // Default for text-based results
-    let finalContent = result.content;
+    let finalContent = result.content || '';
     if (result.type === 'worksheet' && showAnswerKey && result.answerKey) {
       finalContent += `<hr class="my-8" />` + result.answerKey;
     }
@@ -344,16 +353,7 @@ export default function ShikshaSahayakPage() {
           <h1 className="font-headline text-2xl font-bold">ShikshaSahayak: Content Creation Toolkit</h1>
           <p className="text-muted-foreground">Your personal AI-powered toolkit for creating educational materials.</p>
         </div>
-        <div>
-          <button
-            type="button"
-            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border transition-colors duration-200 ${online ? 'bg-green-100 text-green-800 border-green-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'}`}
-            disabled
-          >
-            <svg className={`w-3 h-3 mr-1 ${online ? 'fill-green-500' : 'fill-yellow-500'}`} viewBox="0 0 8 8"><circle cx="4" cy="4" r="4"/></svg>
-            {online ? 'Online (Gemini)' : 'Offline (Gemma 3:4b)'}
-          </button>
-        </div>
+        {/* Removed local online/offline status button */}
       </div>
       <Tabs defaultValue="lesson-plan" className="w-full">
         <TabsList className="grid w-full grid-cols-4 mb-6">

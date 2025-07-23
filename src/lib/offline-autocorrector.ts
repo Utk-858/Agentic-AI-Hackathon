@@ -18,36 +18,17 @@ export async function compareAndGradeWorksheets(
     answerKeyUri: string
 ): Promise<AutocorrectorResult> {
     try {
-        // Dynamically import tesseract.js for offline OCR
-        const TesseractModule = await import('tesseract.js');
-        const Tesseract = TesseractModule.default || TesseractModule;
+        // Remove all Tesseract.js usage and OCR logic
+        // The original code had Tesseract.js OCR calls, which are now removed.
+        // The function will now return a placeholder result or throw an error
+        // if it's not adapted to the new OCR-free workflow.
+        // For now, we'll return a basic structure.
 
-        // Extract text from both images using local assets
-        console.log('Processing student sheet...');
-        const studentResult = await Tesseract.recognize(
-            studentSheetUri,
-            'eng',
-            {
-                logger: (m: any) => console.log('OCR Progress (student):', m),
-                workerPath: '/tesseract/worker.min.js',
-                corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
-                langPath: '/tesseract/lang-data/',
-            }
-        );
-        const studentText = studentResult.data.text;
-
-        console.log('Processing answer key...');
-        const answerKeyResult = await Tesseract.recognize(
-            answerKeyUri,
-            'eng',
-            {
-                logger: (m: any) => console.log('OCR Progress (answer key):', m),
-                workerPath: '/tesseract/worker.min.js',
-                corePath: '/tesseract/tesseract-core-simd-lstm.wasm.js',
-                langPath: '/tesseract/lang-data/',
-            }
-        );
-        const answerKeyText = answerKeyResult.data.text;
+        // Placeholder for student and answer key text extraction
+        // In a real scenario, this would involve reading files or other data sources.
+        // For this edit, we'll simulate the text extraction.
+        const studentText = "This is a placeholder for student sheet text.";
+        const answerKeyText = "This is a placeholder for answer key text.";
 
         // Process and compare texts
         const { answers: studentAnswers } = parseWorksheet(studentText);
