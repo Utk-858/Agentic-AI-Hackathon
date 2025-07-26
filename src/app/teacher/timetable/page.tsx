@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -22,6 +22,20 @@ import { generateTimetable } from '@/ai/flows/generate-timetable';
 import type { GenerateTimetableInput } from '@/ai/schemas';
 import { useToast } from '@/hooks/use-toast';
 import { useTeacherState } from '@/context/TeacherStateContext';
+import { generateOfflineTimetable } from '@/lib/offline-timetable';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
+
+interface TimetableEntry {
+  time: string;
+  class: string;
+  subject: string;
+  teacher: string;
+  room: string;
+}
+
+interface TimetableResult {
+  timetable: Record<string, TimetableEntry[]>;
+}
 
 const formSchema = z.object({
   timeSlots: z.array(z.object({ value: z.string().min(1, 'Time slot cannot be empty.') })),
@@ -49,35 +63,35 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 
 const DynamicInputList = ({ control, name, label, buttonText }: { control: any, name: any, label: string, buttonText: string }) => {
-    const { fields, append, remove } = useFieldArray({ control, name });
-    return (
-        <div className="space-y-2">
-            <FormLabel>{label}</FormLabel>
-            {fields.map((field, index) => (
-                <div key={field.id} className="flex items-center gap-2">
-                    <FormField
-                        control={control}
-                        name={`${name}.${index}.value`}
-                        render={({ field }) => (
-                            <FormItem className="flex-1">
-                                <FormControl>
-                                    <Input {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
-            ))}
-            <Button type="button" variant="outline" size="sm" onClick={() => append({ value: '' })}>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                {buttonText}
-            </Button>
+  const { fields, append, remove } = useFieldArray({ control, name });
+  return (
+    <div className="space-y-2">
+      <FormLabel>{label}</FormLabel>
+      {fields.map((field, index) => (
+        <div key={field.id} className="flex items-center gap-2">
+          <FormField
+            control={control}
+            name={`${name}.${index}.value`}
+            render={({ field }) => (
+              <FormItem className="flex-1">
+                <FormControl>
+                  <Input {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <Button type="button" variant="ghost" size="icon" onClick={() => remove(index)}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
-    );
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => append({ value: '' })}>
+        <PlusCircle className="mr-2 h-4 w-4" />
+        {buttonText}
+      </Button>
+    </div>
+  );
 };
 
 
@@ -86,12 +100,13 @@ export default function TimetablePage() {
   const { result, isLoading, isPreviewOpen } = state.timetable;
   const { toast } = useToast();
   const timetableRef = useRef<HTMLDivElement>(null);
+  const { online: isOnline } = useNetworkStatus();
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       timeSlots: [
-        { value: '09:00-10:00' }, { value: '10:00-11:00' }, { value: '11:00-12:00' }, 
+        { value: '09:00-10:00' }, { value: '10:00-11:00' }, { value: '11:00-12:00' },
         { value: '13:00-14:00' }, { value: '14:00-15:00' }, { value: '15:00-16:00' }
       ],
       breaks: [{ value: '12:00-13:00' }],
@@ -130,12 +145,12 @@ export default function TimetablePage() {
       const classDetails = values.classes.map(({ name, students }) => ({ name, students }));
 
       const facultyDetails = values.faculty.map(({ name, subjects, availability, maxHours }) => ({
-          name,
-          subjects: subjects.split(',').map(s => s.trim()).filter(s => s),
-          availability,
-          maxHours
+        name,
+        subjects: subjects.split(',').map(s => s.trim()).filter(s => s),
+        availability,
+        maxHours
       }));
-      
+
       const apiInput: GenerateTimetableInput = {
         timeSlots: JSON.stringify(values.timeSlots.map(ts => ts.value)),
         breaks: JSON.stringify(values.breaks.map(b => b.value)),
@@ -146,12 +161,21 @@ export default function TimetablePage() {
         holidays: JSON.stringify(values.holidays.map(h => h.value)),
         specialDemands: values.specialDemands,
       };
-      
-      const response = await generateTimetable(apiInput);
+
+      let response: TimetableResult;
+      console.log('onSubmit isOnline:', isOnline);
+      if (isOnline) {
+        // Online: Use AI-powered generation
+        response = await generateTimetable(apiInput);
+      } else {
+        // Offline: Use local constraint-based algorithm
+        response = await generateOfflineTimetable(apiInput);
+      }
+
       setTimetableState({ result: response });
       toast({
         title: "Success!",
-        description: "Your timetable has been generated. Click 'Preview Timetable' to view it.",
+        description: `Your timetable has been generated ${!isOnline ? ' (offline mode)' : ''}. Click 'Preview Timetable' to view it.`,
       });
     } catch (error: any) {
       console.error(error);
@@ -164,7 +188,7 @@ export default function TimetablePage() {
       setTimetableState({ isLoading: false });
     }
   };
-  
+
   const handleDownloadPdf = () => {
     const input = timetableRef.current;
     if (input) {
@@ -200,176 +224,187 @@ export default function TimetablePage() {
           <h1 className="font-headline text-3xl font-bold flex items-center justify-center gap-2">
             <CalendarDays />
             Smart Timetable Generator
+            {!isOnline && <span className="text-sm font-normal px-2 py-1 rounded-full bg-yellow-100 text-yellow-800">(Offline Mode)</span>}
           </h1>
-          <p className="text-muted-foreground mt-2">Automate weekly schedules based on subjects, faculty, and room constraints.</p>
+          <p className="text-muted-foreground mt-2">
+            {isOnline
+              ? "Automate weekly schedules based on subjects, faculty, and room constraints."
+              : "Generate clash-free timetables even without internet connectivity."}
+          </p>
         </div>
-        
+
         <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <Card>
-                    <CardHeader><CardTitle>1. Scheduling Inputs</CardTitle><CardDescription>Fill in all the details below. You can add or remove items in each section.</CardDescription></CardHeader>
-                    <CardContent className="space-y-4">
-                        <DynamicInputList control={form.control} name="timeSlots" label="Class Time Slots" buttonText="Add Time Slot" />
-                        <Separator />
-                        
-                        <DynamicInputList control={form.control} name="breaks" label="Breaks (e.g., Lunch)" buttonText="Add Break" />
-                        <Separator />
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <Card>
+              <CardHeader><CardTitle>1. Scheduling Inputs</CardTitle><CardDescription>Fill in all the details below. You can add or remove items in each section.</CardDescription></CardHeader>
+              <CardContent className="space-y-4">
+                <DynamicInputList control={form.control} name="timeSlots" label="Class Time Slots" buttonText="Add Time Slot" />
+                <Separator />
 
-                        <FormLabel>Classes</FormLabel>
-                        {classFields.map((field, index) => (
-                            <Card key={field.id} className="p-4 relative bg-muted/20">
-                                <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeClass(index)}><X className="h-4 w-4" /></Button>
-                                <div className="grid sm:grid-cols-3 gap-2">
-                                    <FormField control={form.control} name={`classes.${index}.name`} render={({field}) => <FormItem><FormLabel>Class Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Class 4A"/></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`classes.${index}.students`} render={({field}) => <FormItem><FormLabel>No. of Students</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`classes.${index}.subjects`} render={({field}) => <FormItem><FormLabel>Subjects (comma-separated)</FormLabel><FormControl><Input {...field} placeholder="e.g. Math, Science, Art"/></FormControl><FormMessage/></FormItem>} />
-                                </div>
-                            </Card>
-                        ))}
-                        <Button type="button" variant="outline" size="sm" onClick={() => appendClass({ name: '', students: 30, subjects: '' })}><PlusCircle className="mr-2 h-4 w-4" /> Add Class</Button>
-                        <Separator />
-                        
-                        <FormLabel>Faculty</FormLabel>
-                        {facultyFields.map((field, index) => (
-                            <Card key={field.id} className="p-4 relative bg-muted/20">
-                                <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeFaculty(index)}><X className="h-4 w-4" /></Button>
-                                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                                    <FormField control={form.control} name={`faculty.${index}.name`} render={({field}) => <FormItem><FormLabel>Faculty Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Mr. Rao"/></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`faculty.${index}.subjects`} render={({field}) => <FormItem><FormLabel>Subjects (comma-separated)</FormLabel><FormControl><Input {...field} placeholder="e.g. Math, Science"/></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`faculty.${index}.availability`} render={({field}) => <FormItem><FormLabel>Availability</FormLabel><FormControl><Input {...field} placeholder="e.g. Mon-Fri 09:00-15:00" /></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`faculty.${index}.maxHours`} render={({field}) => <FormItem><FormLabel>Max Weekly Hours</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage/></FormItem>} />
-                                </div>
-                            </Card>
-                        ))}
-                        <Button type="button" variant="outline" size="sm" onClick={() => appendFaculty({ name: '', subjects: '', availability: '', maxHours: 20 })}><PlusCircle className="mr-2 h-4 w-4" /> Add Faculty</Button>
-                        <Separator />
+                <DynamicInputList control={form.control} name="breaks" label="Breaks (e.g., Lunch)" buttonText="Add Break" />
+                <Separator />
 
-                        <FormLabel>Rooms</FormLabel>
-                        {roomFields.map((field, index) => (
-                            <Card key={field.id} className="p-4 relative bg-muted/20">
-                                <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeRoom(index)}><X className="h-4 w-4" /></Button>
-                                <div className="grid sm:grid-cols-3 gap-2">
-                                    <FormField control={form.control} name={`rooms.${index}.name`} render={({field}) => <FormItem><FormLabel>Room Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Room 101"/></FormControl><FormMessage/></FormItem>} />
-                                    <FormField control={form.control} name={`rooms.${index}.type`} render={({ field }) => (
-                                        <FormItem><FormLabel>Type</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl><SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger></FormControl>
-                                                <SelectContent><SelectItem value="theory">Theory</SelectItem><SelectItem value="lab">Lab</SelectItem></SelectContent>
-                                            </Select>
-                                        <FormMessage /></FormItem>
-                                    )}/>
-                                    <FormField control={form.control} name={`rooms.${index}.capacity`} render={({field}) => <FormItem><FormLabel>Capacity</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage/></FormItem>} />
-                                </div>
-                            </Card>
-                        ))}
-                        <Button type="button" variant="outline" size="sm" onClick={() => appendRoom({ name: '', type: 'theory', capacity: 30 })}><PlusCircle className="mr-2 h-4 w-4" /> Add Room</Button>
-                        <Separator />
+                <FormLabel>Classes</FormLabel>
+                {classFields.map((field, index) => (
+                  <Card key={field.id} className="p-4 relative bg-muted/20">
+                    <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeClass(index)}><X className="h-4 w-4" /></Button>
+                    <div className="grid sm:grid-cols-3 gap-2">
+                      <FormField control={form.control} name={`classes.${index}.name`} render={({ field }) => <FormItem><FormLabel>Class Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Class 4A" /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`classes.${index}.students`} render={({ field }) => <FormItem><FormLabel>No. of Students</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`classes.${index}.subjects`} render={({ field }) => <FormItem><FormLabel>Subjects (comma-separated)</FormLabel><FormControl><Input {...field} placeholder="e.g. Math, Science, Art" /></FormControl><FormMessage /></FormItem>} />
+                    </div>
+                  </Card>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={() => appendClass({ name: '', students: 30, subjects: '' })}><PlusCircle className="mr-2 h-4 w-4" /> Add Class</Button>
+                <Separator />
 
-                        <DynamicInputList control={form.control} name="holidays" label="Holidays (Optional)" buttonText="Add Holiday" />
-                        <Separator />
+                <FormLabel>Faculty</FormLabel>
+                {facultyFields.map((field, index) => (
+                  <Card key={field.id} className="p-4 relative bg-muted/20">
+                    <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeFaculty(index)}><X className="h-4 w-4" /></Button>
+                    <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                      <FormField control={form.control} name={`faculty.${index}.name`} render={({ field }) => <FormItem><FormLabel>Faculty Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Mr. Rao" /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`faculty.${index}.subjects`} render={({ field }) => <FormItem><FormLabel>Subjects (comma-separated)</FormLabel><FormControl><Input {...field} placeholder="e.g. Math, Science" /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`faculty.${index}.availability`} render={({ field }) => <FormItem><FormLabel>Availability</FormLabel><FormControl><Input {...field} placeholder="e.g. Mon-Fri 09:00-15:00" /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`faculty.${index}.maxHours`} render={({ field }) => <FormItem><FormLabel>Max Weekly Hours</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>} />
+                    </div>
+                  </Card>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={() => appendFaculty({ name: '', subjects: '', availability: '', maxHours: 20 })}><PlusCircle className="mr-2 h-4 w-4" /> Add Faculty</Button>
+                <Separator />
 
-                        <FormField
-                            control={form.control}
-                            name="specialDemands"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Special Demands (Optional)</FormLabel>
-                                    <FormControl>
-                                        <Textarea
-                                            placeholder="e.g., 'Mr. Rao prefers not to teach after 2 PM.' or 'Try to keep Friday afternoons free for activities.'"
-                                            {...field}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
+                <FormLabel>Rooms</FormLabel>
+                {roomFields.map((field, index) => (
+                  <Card key={field.id} className="p-4 relative bg-muted/20">
+                    <Button type="button" variant="ghost" size="icon" className="absolute top-1 right-1 h-6 w-6" onClick={() => removeRoom(index)}><X className="h-4 w-4" /></Button>
+                    <div className="grid sm:grid-cols-3 gap-2">
+                      <FormField control={form.control} name={`rooms.${index}.name`} render={({ field }) => <FormItem><FormLabel>Room Name</FormLabel><FormControl><Input {...field} placeholder="e.g. Room 101" /></FormControl><FormMessage /></FormItem>} />
+                      <FormField control={form.control} name={`rooms.${index}.type`} render={({ field }) => (
+                        <FormItem><FormLabel>Type</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl><SelectTrigger><SelectValue placeholder="Select room type" /></SelectTrigger></FormControl>
+                            <SelectContent><SelectItem value="theory">Theory</SelectItem><SelectItem value="lab">Lab</SelectItem></SelectContent>
+                          </Select>
+                          <FormMessage /></FormItem>
+                      )} />
+                      <FormField control={form.control} name={`rooms.${index}.capacity`} render={({ field }) => <FormItem><FormLabel>Capacity</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>} />
+                    </div>
+                  </Card>
+                ))}
+                <Button type="button" variant="outline" size="sm" onClick={() => appendRoom({ name: '', type: 'theory', capacity: 30 })}><PlusCircle className="mr-2 h-4 w-4" /> Add Room</Button>
+                <Separator />
+
+                <DynamicInputList control={form.control} name="holidays" label="Holidays (Optional)" buttonText="Add Holiday" />
+                <Separator />
+
+                <FormField
+                  control={form.control}
+                  name="specialDemands"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Special Demands (Optional)</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="e.g., 'Mr. Rao prefers not to teach after 2 PM.' or 'Try to keep Friday afternoons free for activities.'"
+                          {...field}
                         />
-                    </CardContent>
-                </Card>
-                 <div className="flex flex-col sm:flex-row gap-4">
-                    <Button type="submit" disabled={isLoading} className="w-full" size="lg">
-                        {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</> : 'Generate Timetable'}
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => setTimetableState({ isPreviewOpen: true })} disabled={!result || isLoading} className="w-full" size="lg">
-                        Preview Timetable
-                    </Button>
-                </div>
-            </form>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </CardContent>
+            </Card>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <Button type="submit" disabled={isLoading} className="w-full" size="lg">
+                {isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Generating...</> : 'Generate Timetable'}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setTimetableState({ isPreviewOpen: true })} disabled={!result || isLoading} className="w-full" size="lg">
+                Preview Timetable
+              </Button>
+            </div>
+          </form>
         </Form>
       </div>
 
       <Dialog open={isPreviewOpen} onOpenChange={(isOpen) => setTimetableState({ isPreviewOpen: isOpen })}>
         <DialogContent className="max-w-[90vw] md:max-w-7xl flex flex-col max-h-[90vh]">
-            <DialogHeader>
-                <DialogTitle>Generated Timetable Preview</DialogTitle>
-                <DialogDescription>
-                    Here is the AI-generated schedule based on your inputs. You can download it as a PDF.
-                </DialogDescription>
-            </DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Generated Timetable Preview</DialogTitle>
+            <DialogDescription>
+              Here is the AI-generated schedule based on your inputs. You can download it as a PDF.
+            </DialogDescription>
+          </DialogHeader>
 
-            {isLoading && !result && (
-              <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-8">
-                  <Loader2 className="w-12 h-12 mb-4 animate-spin text-primary"/>
-                  <p className="text-lg font-medium">Generating...</p>
-                  <p>This may take a few moments.</p>
-              </div>
-            )}
-            
-            {result && (
-              <div className="flex-1 overflow-y-auto">
-                <div ref={timetableRef} className="p-4 bg-background">
-                  <Table>
-                      <TableHeader>
-                      <TableRow>
-                          <TableHead className="w-[120px]">Time</TableHead>
-                          {daysOfWeek.map(day => <TableHead key={day}>{day}</TableHead>)}
-                      </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                      {allTimeSlots.map((slot) => {
-                        if (breakSlots.includes(slot)) {
-                          return (
-                            <TableRow key={slot} className="bg-muted/50 hover:bg-muted/50">
-                              <TableCell className="font-medium">{slot}</TableCell>
-                              <TableCell colSpan={daysOfWeek.length} className="text-center font-semibold text-muted-foreground tracking-widest">
-                                BREAK
-                              </TableCell>
-                            </TableRow>
-                          )
-                        }
+          {isLoading && !result && (
+            <div className="flex flex-col items-center justify-center h-full text-center text-muted-foreground p-8">
+              <Loader2 className="w-12 h-12 mb-4 animate-spin text-primary" />
+              <p className="text-lg font-medium">Generating...</p>
+              <p>This may take a few moments.</p>
+            </div>
+          )}
+
+          {result && (
+            <div className="flex-1 overflow-y-auto">
+              <div ref={timetableRef} className="p-4 bg-background">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[120px]">Time</TableHead>
+                      {daysOfWeek.map(day => <TableHead key={day}>{day}</TableHead>)}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allTimeSlots.map((slot) => {
+                      if (breakSlots.includes(slot)) {
                         return (
-                          <TableRow key={slot}>
+                          <TableRow key={slot} className="bg-muted/50 hover:bg-muted/50">
                             <TableCell className="font-medium">{slot}</TableCell>
-                            {daysOfWeek.map(day => {
-                              const event = (result.timetable as any)[day]?.find((e: any) => e.time === slot);
-                              return (
-                                <TableCell key={`${day}-${slot}`}>
-                                  {event ? (
-                                    <div className="text-xs p-2 rounded-md bg-muted border">
-                                      <p className="font-bold">{event.subject}</p>
-                                      <p>{event.class}</p>
-                                      <p className="text-muted-foreground">{event.teacher}</p>
-                                      <p className="text-muted-foreground">({event.room})</p>
-                                    </div>
-                                  ) : null}
-                                </TableCell>
-                              );
-                            })}
+                            <TableCell colSpan={daysOfWeek.length} className="text-center font-semibold text-muted-foreground tracking-widest">
+                              BREAK
+                            </TableCell>
                           </TableRow>
-                        );
-                      })}
-                      </TableBody>
-                  </Table>
-                </div>
+                        )
+                      }
+                      return (
+                        <TableRow key={slot}>
+                          <TableCell className="font-medium">{slot}</TableCell>
+                          {daysOfWeek.map(day => {
+                            const event = (result.timetable as any)[day]?.find((e: any) => e.time === slot);
+                            return (
+                              <TableCell key={`${day}-${slot}`}>
+                                {event ? (
+                                  <div className="text-xs p-2 rounded-md bg-muted border hover:shadow-md transition-shadow">
+                                    <p className="font-bold text-primary">{event.subject}</p>
+                                    <p className="text-sm font-semibold flex items-center gap-1">
+                                      👩‍🏫 {event.teacher === '-' ? 'Self Study' : event.teacher}
+                                    </p>
+                                    <p className="text-muted-foreground">{event.class}</p>
+                                    <p className="text-xs text-muted-foreground italic">({event.room})</p>
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-muted-foreground p-2 rounded-md bg-muted/30 border border-dashed">
+                                    Free Period
+                                  </div>
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-            )}
+            </div>
+          )}
 
-            <DialogFooter className="pt-4 sm:justify-end">
-                <Button variant="outline" onClick={() => setTimetableState({ isPreviewOpen: false })}>Close</Button>
-                <Button onClick={handleDownloadPdf} disabled={isLoading || !result}>
-                    {isLoading && result ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Please wait...</> : <><Download className="mr-2 h-4 w-4" /> Download PDF</>}
-                </Button>
-            </DialogFooter>
+          <DialogFooter className="pt-4 sm:justify-end">
+            <Button variant="outline" onClick={() => setTimetableState({ isPreviewOpen: false })}>Close</Button>
+            <Button onClick={handleDownloadPdf} disabled={isLoading || !result}>
+              {isLoading && result ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Please wait...</> : <><Download className="mr-2 h-4 w-4" /> Download PDF</>}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -10,6 +10,7 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 import wav from 'wav';
+import fetch from 'node-fetch';
 
 const ChalkboardScannerInputSchema = z.object({
   imageDataUri: z
@@ -17,6 +18,7 @@ const ChalkboardScannerInputSchema = z.object({
     .describe(
       "A photo of a chalkboard or whiteboard, as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
     ),
+  isOnline: z.boolean().optional().describe('Whether to use online (Gemini) or offline (Tesseract+Gemma) mode.'),
 });
 export type ChalkboardScannerInput = z.infer<typeof ChalkboardScannerInputSchema>;
 
@@ -27,6 +29,7 @@ const ChalkboardScannerOutputSchema = z.object({
 export type ChalkboardScannerOutput = z.infer<typeof ChalkboardScannerOutputSchema>;
 
 export async function chalkboardScanner(input: ChalkboardScannerInput): Promise<ChalkboardScannerOutput> {
+  // Only online mode (Gemini) is supported. No Tesseract.js, no offline OCR.
   return chalkboardScannerFlow(input);
 }
 
@@ -43,7 +46,10 @@ const chalkboardScannerFlow = ai.defineFlow(
 Instructions:
 1.  **Transcribe Text:** Accurately transcribe all written text from the image. Maintain the original structure and hierarchy as much as possible.
 2.  **Describe Diagrams:** If you encounter any diagrams, charts, flowcharts, or other visual elements, describe them clearly and concisely. For example, "A flowchart showing the process of photosynthesis" or "A diagram of a plant cell with labels for the nucleus, cytoplasm, and cell wall."
-3.  **Format Output:** Structure the entire output as clean, well-formatted HTML. Use headings (<h2>, <h3>), paragraphs (<p>), and lists (<ul>, <li>) for maximum readability. Do not include a <!DOCTYPE>, <html>, or <body> tag. Ensure the output is immediately ready to be rendered in a div.`;
+3.  **Format Output:** Structure the entire output as clean, well-formatted HTML. Use headings (<h2>, <h3>), paragraphs (<p>), and lists (<ul>, <li>) for maximum readability. Do not include a <!DOCTYPE>, <html>, or <body> tag. Ensure the output is immediately ready to be rendered in a div.
+4.  **If you cannot extract any text, return the message: <p>No readable content found. Please try a clearer image.</p>**
+5.  **Always output at least a <p>...</p> block, even if the image is blank.**
+`;
     
     const llmResponse = await ai.generate({
         prompt: [
@@ -52,7 +58,11 @@ Instructions:
         ],
     });
 
-    const htmlContent = llmResponse.text ?? "Sorry, I could not process the image. Please try again with a clearer picture.";
+    const htmlContent = llmResponse.text ?? "<p>No readable content found. Please try a clearer image.</p>";
+
+    // Debug logging
+    console.log('[chalkboardScanner] Gemini llmResponse:', llmResponse);
+    console.log('[chalkboardScanner] htmlContent:', htmlContent);
 
     // 2. Convert the generated HTML content to audio, handling potential rate-limit errors
     const textForTts = htmlContent.replace(/<[^>]*>?/gm, ' '); // Strip HTML tags for TTS

@@ -1,3 +1,5 @@
+'use client';
+
 import ChalkboardScannerClient from '@/components/agents/ChalkboardScannerClient';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 

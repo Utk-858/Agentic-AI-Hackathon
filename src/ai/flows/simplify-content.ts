@@ -8,8 +8,9 @@
  * - SimplifyContentOutput - The return type for the simplifyContent function.
  */
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import { ai } from '@/ai/genkit';
+import { callOllamaGemma } from '@/ai/ollama';
+import { z } from 'genkit';
 
 const SimplifyContentInputSchema = z.object({
   complexText: z.string().describe('The complex text that needs to be simplified.'),
@@ -27,8 +28,35 @@ const SimplifyContentOutputSchema = z.object({
 });
 export type SimplifyContentOutput = z.infer<typeof SimplifyContentOutputSchema>;
 
-export async function simplifyContent(input: SimplifyContentInput): Promise<SimplifyContentOutput> {
-  return simplifyContentFlow(input);
+export async function simplifyContent(input: SimplifyContentInput, isOnline: boolean): Promise<SimplifyContentOutput> {
+  if (isOnline) {
+    return await simplifyContentFlow(input);
+  } else {
+    let prompt = `
+You are an expert teacher. Your task is to explain the following concept or text in a way that is much easier to understand for the target audience:
+
+- Target Audience: ${input.targetAudience}
+- Language: ${input.language}
+
+Original Text:
+"""
+${input.complexText}
+"""
+
+Instructions:
+- Do NOT just summarize or shorten the text. Instead, explain the concept in a simple, clear, and engaging way.
+- Use your own knowledge, analogies, and examples to help the student truly understand the concept.
+- Use clear, age-appropriate language and break down complex ideas into smaller, digestible parts.
+- If helpful, use bullet points (<ul>/<li>), short paragraphs (<p>), and bold key terms (<strong>).
+- Do NOT include <!DOCTYPE> or <html>/<body> tags.
+- Do NOT use Markdown.
+- Use only the specified HTML tags for formatting.
+
+${input.specialRequest ? `Special Request: ${input.specialRequest}` : ''}
+`;
+    const simplifiedText = await callOllamaGemma(prompt);
+    return { simplifiedText };
+  }
 }
 
 const simplifyContentFlow = ai.defineFlow(
@@ -38,20 +66,10 @@ const simplifyContentFlow = ai.defineFlow(
     outputSchema: SimplifyContentOutputSchema,
   },
   async ({ complexText, targetAudience, language, specialRequest }) => {
-    let prompt = `You are an expert at simplifying complex text for different audiences in various languages.
-
-Simplify the following text into ${language}.
-The target audience is: ${targetAudience}.
-
-Complex Text:
-"""
-${complexText}
-"""`;
-
+    let prompt = `You are an expert at simplifying complex text for different audiences in various languages.\n\nSimplify the following text into ${language}.\nThe target audience is: ${targetAudience}.\n\nComplex Text:\n\"\"\"\n${complexText}\n\"\"\"`;
     if (specialRequest) {
-      prompt += `\n\nSpecial Request: "${specialRequest}"\nPlease take this special request into account.`;
+      prompt += `\n\nSpecial Request: \"${specialRequest}\"\nPlease take this special request into account.`;
     }
-
     prompt += `\n\nProvide only the simplified text as a direct response, without any extra commentary. Format the output using simple HTML tags like <p>, <strong>, and <ul>/<li> for clarity. Do not include a <!DOCTYPE> or <html>/<body> tags.`;
     
     const result = await ai.generate({
